@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent for the yt-music-bridge Go server.
+
+  Install location: ~/Library/LaunchAgents/com.user.ytmsync.plist
+
+  IMPORTANT: Update the ProgramArguments path below to the absolute path of
+  your compiled `yt-music-bridge` binary (see README.md for build steps).
+  launchd does not expand `~`, so it must be a fully-qualified path such as
+  /Users/<you>/Code/Projects/yt-playpause-server/yt-music-bridge.
+-->
+<plist version="1.0">
+<dict>
+    <!-- Reverse-DNS style unique identifier for this agent. -->
+    <key>Label</key>
+    <string>com.user.ytmsync</string>
+
+    <!-- The compiled binary to run, with no arguments. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/rohanjadhav/Code/Projects/yt-playpause-server/yt-music-bridge</string>
+    </array>
+
+    <!-- Start automatically as soon as the agent is loaded (e.g. at login). -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart the process automatically if it exits/crashes for any
+         reason, keeping the bridge available across sleep/wake and any
+         unexpected failures. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Run with the user's normal login environment/working directory. -->
+    <key>WorkingDirectory</key>
+    <string>/Users/rohanjadhav/Code/Projects/yt-playpause-server</string>
+
+    <!-- Name of the installed app to control, exactly as macOS/System
+         Events knows it. Verify with:
+           osascript -e 'tell application "YT Music" to activate'
+         then adjust the value below to match your install
+         (e.g. "YouTube Music", "YT Music", "Youtube Music Desktop App"). -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>YTM_APP_NAME</key>
+        <string>YT Music</string>
+    </dict>
+
+    <!-- Redirect stdout/stderr to log files for debugging. -->
+    <key>StandardOutPath</key>
+    <string>/tmp/com.user.ytmsync.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/com.user.ytmsync.err.log</string>
+
+    <!-- Low priority background process; this is a small control-plane
+         server, not something that needs elevated scheduling priority. -->
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
