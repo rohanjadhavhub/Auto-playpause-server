@@ -293,30 +293,25 @@ func resumeAppleScript() string {
 	return fmt.Sprintf(`tell application %q to play`, appName)
 }
 
-// spaceKeystrokeAppleScript activates the target app and sends a Space
-// keystroke through System Events, which toggles play/pause in virtually
-// every web-based YouTube Music client, then restores whichever app was
-// frontmost beforehand (typically Chrome) so focus isn't stolen from the
-// user. This requires the user to grant Accessibility permissions to the
-// compiled binary under System Settings > Privacy & Security >
-// Accessibility.
+// spaceKeystrokeAppleScript delivers a Space keystroke directly to the
+// target app's System Events process without activating (focusing) it.
+// This avoids the brief "back and forth" window-focus animation that the
+// previous activate → keystroke → re-activate approach caused.
+//
+// `tell process X to keystroke` works for background processes as long as
+// Accessibility permissions are granted to the compiled binary under
+// System Settings > Privacy & Security > Accessibility. The try/end try
+// wrapper makes it a silent no-op if the process isn't found under that
+// name, preserving the same failure mode as before.
 func spaceKeystrokeAppleScript() string {
 	return fmt.Sprintf(`
-set previousApp to ""
 tell application "System Events"
 	try
-		set previousApp to name of first process whose frontmost is true
+		tell process %q
+			keystroke " "
+		end tell
 	end try
-end tell
-
-tell application %q to activate
-delay 0.05
-tell application "System Events" to keystroke " "
-
-if previousApp is not "" and previousApp is not %q then
-	delay 0.05
-	tell application previousApp to activate
-end if`, appName, appName)
+end tell`, appName)
 }
 
 // runOsascript executes the given AppleScript source via `osascript -e`.
