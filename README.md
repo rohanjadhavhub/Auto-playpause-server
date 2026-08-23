@@ -1,193 +1,203 @@
-# YT -> YouTube Music Sync
+# YT → YouTube Music Sync
 
-Automatically pauses/resumes the `YT Music.app` desktop app on macOS
-whenever a YouTube video starts or stops playing in Chrome. Three pieces:
+> **macOS only** · Tampermonkey + Go · No third-party dependencies
 
-1. `main.go` — local Go HTTP bridge server (`127.0.0.1:8765`), stdlib only.
-2. `yt-music-sync.user.js` — Tampermonkey userscript for `youtube.com`.
-3. `com.user.ytmsync.plist` — LaunchAgent to run the bridge headlessly at login.
+Automatically **pauses** your YouTube Music desktop app the moment a YouTube video starts playing in Chrome, and **resumes** it the moment you pause or stop the video. Works across multiple YouTube tabs — Music stays paused as long as *any* tab is playing.
 
-## Your setup: `YT Music.app`
-
-The PRD assumes the target app is scriptable via `tell application "YouTube
-Music" to pause/play/set sound volume`. The app actually installed on this
-machine is **`YT Music.app`** (a Safari Web App wrapper, bundle id
-`com.apple.Safari.WebApp...`), and it has **no AppleScript dictionary at
-all** — `pause`, `play`, and `sound volume` all fail with "variable ... is
-not defined" when tested directly. This is common: most Electron/WKWebView
-wrappers don't ship an `.sdef`.
-
-To handle this, the bridge does two things:
-
-- **Play/pause/resume**: tries the AppleScript verb first; since `YT
-  Music.app` doesn't support it, it falls back to activating the app and
-  sending a Space keystroke via System Events (YouTube Music's native
-  play/pause shortcut). Verified working end-to-end against `YT Music.app`.
-- **Volume**: only uses the AppleScript `sound volume` property, which `YT
-  Music.app` doesn't support, so `/volume` will always return
-  `501 Not Implemented`. You've said you'll manage volume separately, so
-  this is left as-is — see Known Limitations below.
-
-The bridge is already configured for this app via the `YTM_APP_NAME`
-environment variable (defaults to `"YouTube Music"` per the PRD if unset):
-
-```bash
-YTM_APP_NAME="YT Music" ./yt-music-bridge
+```
+YouTube video plays  →  YT Music pauses  ✓
+YouTube video pauses →  YT Music resumes ✓
+Two tabs open?       →  Music stays paused until both stop ✓
 ```
 
-`com.user.ytmsync.plist` already sets `YTM_APP_NAME=YT Music`, so no edits
-are needed there for this app.
+---
 
-If you ever reinstall under a different app name, re-check with:
+## How it works
+
+Three pieces work together:
+
+| File | Role |
+|---|---|
+| `main.go` | Tiny Go HTTP server (`127.0.0.1:8765`). Receives `/pause` and `/resume` calls and controls YT Music via AppleScript / System Events. |
+| `yt-music-sync.user.js` | Tampermonkey userscript. Watches every `<video>` element on `youtube.com` and calls the bridge when playback changes. |
+| `com.user.ytmsync.plist` | macOS LaunchAgent. Keeps the Go server running silently in the background, auto-starting at login. |
+
+---
+
+## Requirements
+
+- macOS (Ventura 13+ recommended)
+- [Go 1.21+](https://go.dev/dl/) — only needed to build the binary once
+- Google Chrome
+- [Tampermonkey](https://www.tampermonkey.net/) extension
+- A YouTube Music desktop app (see [Supported apps](#supported-apps) below)
+
+---
+
+## Installation
+
+### Step 1 — Clone and build
 
 ```bash
-ls /Applications ~/Applications | grep -i music
-osascript -e 'tell application "YT Music" to activate'   # sanity-check the name
-osascript -e 'tell application "YT Music" to pause'      # check AppleScript support
-```
+git clone https://github.com/rohanjadhavhub/Auto-playpause-server.git
+cd Auto-playpause-server
 
-## 1. Build the Go bridge server
-
-Requires Go 1.21+ (check with `go version`).
-
-```bash
-cd /Users/rohanjadhav/Code/Projects/yt-playpause-server
 go build -ldflags="-s -w" -o yt-music-bridge main.go
 ```
 
-`-ldflags="-s -w"` strips debug symbols and DWARF info for a smaller binary;
-functionally identical, just leaner.
+Verify the build:
 
-Run it manually to test:
+```bash
+./yt-music-bridge --help   # should print usage / start the server
+```
+
+### Step 2 — Find your app name
+
+The bridge needs to know the exact name macOS uses for your YouTube Music app.
+Run this to check:
+
+```bash
+ls /Applications ~/Applications | grep -i music
+```
+
+Common names:
+
+| App | `YTM_APP_NAME` value |
+|---|---|
+| Safari Web App (most common) | `YT Music` |
+| Electron wrapper | `YouTube Music` |
+| YouTube Music Desktop App | `Youtube Music Desktop App` |
+
+Quick sanity-check:
+
+```bash
+osascript -e 'tell application "YT Music" to activate'
+```
+
+If the app comes to the front without an error, the name is correct.
+
+### Step 3 — Grant Accessibility permission
+
+The bridge sends keystrokes to YT Music via System Events, which requires
+Accessibility access:
+
+1. **System Settings → Privacy & Security → Accessibility**
+2. Click **+** and add the compiled `yt-music-bridge` binary
+3. Toggle it **on**
+
+> **Why?** Most YouTube Music apps don't have a full AppleScript dictionary,
+> so the bridge falls back to sending a Space keystroke (the universal
+> play/pause shortcut). System Events needs Accessibility permission to do this.
+
+Without this step `/pause` and `/resume` will fail with a `500` error.
+
+### Step 4 — Install the Tampermonkey userscript
+
+1. Install [Tampermonkey](https://www.tampermonkey.net/) in Chrome
+2. Click the Tampermonkey icon → **Create a new script**
+3. Delete the boilerplate and paste the full contents of `yt-music-sync.user.js`
+4. Save (`Cmd+S`)
+5. Confirm it appears as **enabled** in the Tampermonkey dashboard under `https://www.youtube.com/*`
+
+### Step 5 — Test manually
+
+Start the bridge in one terminal:
 
 ```bash
 YTM_APP_NAME="YT Music" ./yt-music-bridge
+# yt-music-bridge listening on http://127.0.0.1:8765 (target app: "YT Music")
 ```
 
-You should see:
-
-```
-yt-music-bridge listening on http://127.0.0.1:8765 (target app: "YT Music")
-```
-
-### Grant Accessibility permission (required for the keystroke fallback)
-
-Since `YT Music.app` isn't scriptable, the keystroke fallback needs
-Accessibility access to send keystrokes via System Events:
-
-1. System Settings > Privacy & Security > Accessibility.
-2. Add and enable the binary you compiled (`yt-music-bridge`), or the
-   terminal app you're running it from during manual testing.
-3. Without this, `/pause` and `/resume` will return a `500` error
-   mentioning `osascript is not allowed to send keystrokes (1002)`.
-
-### Verify the endpoints manually
+In another terminal, fire test requests:
 
 ```bash
-curl -X GET  http://127.0.0.1:8765/health
-curl -X POST http://127.0.0.1:8765/pause
-curl -X POST http://127.0.0.1:8765/resume
-curl -X POST "http://127.0.0.1:8765/volume?level=50"
+curl -X GET  http://127.0.0.1:8765/health   # → {"status":"ok"}
+curl -X POST http://127.0.0.1:8765/pause    # YT Music should pause
+curl -X POST http://127.0.0.1:8765/resume   # YT Music should resume
 ```
 
-Expected: `{"status":"ok",...}` with HTTP 200 on success. `/volume` returns
-`400` for an out-of-range level and `501` if your app doesn't support
-AppleScript volume control.
+Then open YouTube in Chrome, play a video, and watch YT Music react.
 
-## 2. Install the Tampermonkey userscript
+### Step 6 — Run headlessly at login (LaunchAgent)
 
-1. Install the [Tampermonkey](https://www.tampermonkey.net/) extension in
-   Chrome if you don't already have it.
-2. Click the Tampermonkey icon > Create a new script (or Dashboard >
-   Utilities > Import from file).
-3. Delete the boilerplate and paste in the full contents of
-   `yt-music-sync.user.js`.
-4. Save (Cmd+S). Confirm it's listed as enabled in the Tampermonkey
-   dashboard, matching `https://www.youtube.com/*`.
-5. Open/reload `youtube.com`, open the browser console, and play a video.
-   You should see no errors; if the bridge server isn't running you'll see
-   a `[yt-music-sync] bridge request failed` warning (harmless — YouTube
-   playback itself is unaffected).
+Edit `com.user.ytmsync.plist` — update the two paths to match where you cloned the repo and set your app name:
 
-The script's `BRIDGE_URL` constant assumes the default
-`http://127.0.0.1:8765`; update it if you changed `listenAddr` in `main.go`.
+```xml
+<!-- Line 22: absolute path to your binary -->
+<string>/Users/YOUR_USERNAME/Auto-playpause-server/yt-music-bridge</string>
 
-## 3. Register the LaunchAgent (run headlessly at login)
+<!-- Line 37: same directory -->
+<string>/Users/YOUR_USERNAME/Auto-playpause-server</string>
 
-`com.user.ytmsync.plist` is already configured for this machine: it points
-`ProgramArguments`/`WorkingDirectory` at
-`/Users/rohanjadhav/Code/Projects/yt-playpause-server/yt-music-bridge` and
-sets `YTM_APP_NAME=YT Music`. No edits needed unless you move the binary or
-switch apps.
+<!-- Line 47: your app name from Step 2 -->
+<string>YT Music</string>
+```
 
-1. Copy it into place:
+Then install:
 
-   ```bash
-   cp com.user.ytmsync.plist ~/Library/LaunchAgents/com.user.ytmsync.plist
-   ```
+```bash
+cp com.user.ytmsync.plist ~/Library/LaunchAgents/com.user.ytmsync.plist
+launchctl load ~/Library/LaunchAgents/com.user.ytmsync.plist
+```
 
-3. Load and start it:
+Verify it's running:
 
-   ```bash
-   launchctl load ~/Library/LaunchAgents/com.user.ytmsync.plist
-   ```
+```bash
+launchctl list | grep com.user.ytmsync   # PID should appear in first column
+curl http://127.0.0.1:8765/health        # → {"status":"ok"}
+```
 
-   (On macOS Ventura+, `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.ytmsync.plist`
-   is the modern equivalent if `load` is deprecated on your OS version.)
+The bridge will now start automatically every time you log in and restart
+itself if it ever crashes.
 
-4. Verify it's running:
+---
 
-   ```bash
-   launchctl list | grep com.user.ytmsync
-   curl http://127.0.0.1:8765/health
-   ```
+## Supported apps
 
-5. Check logs if something's wrong:
+The bridge tries the native AppleScript `pause`/`play` verbs first (idempotent,
+no side effects). If the app doesn't have an AppleScript dictionary — which is
+common for Electron wrappers and Safari Web Apps — it falls back to sending a
+Space keystroke directly to the background process via System Events (no window
+focus animation).
 
-   ```bash
-   cat /tmp/com.user.ytmsync.out.log
-   cat /tmp/com.user.ytmsync.err.log
-   ```
+| App type | Primary verb | Keystroke fallback |
+|---|---|---|
+| Apps with AppleScript dict | ✅ Works directly | Not needed |
+| Electron / WKWebView wrappers | ❌ Fails → | ✅ Space keystroke |
+| Safari Web Apps | ❌ Fails → | ✅ Space keystroke |
 
-6. To stop/unload:
+---
 
-   ```bash
-   launchctl unload ~/Library/LaunchAgents/com.user.ytmsync.plist
-   ```
+## Useful commands
 
-7. To restart after editing the binary or plist:
+```bash
+# Check logs
+cat /tmp/com.user.ytmsync.out.log
+cat /tmp/com.user.ytmsync.err.log
 
-   ```bash
-   launchctl unload ~/Library/LaunchAgents/com.user.ytmsync.plist
-   launchctl load ~/Library/LaunchAgents/com.user.ytmsync.plist
-   ```
+# Stop the agent
+launchctl unload ~/Library/LaunchAgents/com.user.ytmsync.plist
 
-The agent will now start automatically every time you log in
-(`RunAtLoad`), and `launchd` will restart it if it ever crashes
-(`KeepAlive`).
+# Restart after updating the binary or plist
+launchctl unload ~/Library/LaunchAgents/com.user.ytmsync.plist
+launchctl load  ~/Library/LaunchAgents/com.user.ytmsync.plist
+```
 
-## End-to-end test
-
-1. Start the LaunchAgent (or run the binary manually).
-2. Open `YT Music.app` and start it playing something.
-3. Open a YouTube video in Chrome and press play — `YT Music.app` should
-   pause within roughly a debounce window (150ms) plus AppleScript/keystroke
-   execution time (single-digit to low double-digit milliseconds).
-4. Pause the YouTube video — `YT Music.app` should resume.
-5. Seek/scrub the YouTube video repeatedly — `YT Music.app` should **not**
-   flicker pause/resume, since the debounce collapses the pause+play burst
-   from scrubbing into a no-op.
+---
 
 ## Known limitations
 
-- **Volume control is not supported.** `YT Music.app` has no AppleScript
-  dictionary, so `/volume` always returns `501`. There's no universal, safe,
-  app-scoped volume keystroke on macOS — only system-wide volume keys exist,
-  which would violate "independent" volume control, so no fallback is
-  attempted. Volume is being handled separately, outside this bridge.
-- **The keystroke fallback briefly activates `YT Music.app`** (`activate` +
-  `delay 0.05` + `keystroke " "`) because System Events can only deliver
-  keystrokes to the frontmost app. This causes a very brief app switch/focus
-  steal; if `YT Music.app` is already frontmost this is imperceptible.
-- **Accessibility permission is required** for the keystroke fallback,
-  since `YT Music.app` isn't AppleScript-scriptable.
+- **Volume control** — `/volume` returns `501 Not Implemented` for apps
+  without an AppleScript dictionary (most YouTube Music installs). There is no
+  safe app-scoped volume keystroke on macOS.
+- **State drift** — If you manually control YT Music while a video is playing
+  (e.g. pause it from the app directly), the bridge's internal state may drift
+  briefly. It self-corrects on the next play/pause event.
+- **Accessibility permission** — Required for apps that lack an AppleScript
+  dictionary. Without it, `/pause` and `/resume` return `500`.
+
+---
+
+## License
+
+MIT

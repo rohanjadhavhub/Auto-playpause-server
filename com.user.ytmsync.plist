@@ -19,7 +19,10 @@
     <!-- The compiled binary to run, with no arguments. -->
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/rohanjadhav/Code/Projects/yt-playpause-server/yt-music-bridge</string>
+        <!-- EDIT: absolute path to the compiled yt-music-bridge binary.
+             launchd does not expand ~, so use a full path.
+             Example: /Users/yourname/Auto-playpause-server/yt-music-bridge -->
+        <string>/Users/YOUR_USERNAME/Auto-playpause-server/yt-music-bridge</string>
     </array>
 
     <!-- Start automatically as soon as the agent is loaded (e.g. at login). -->
@@ -32,9 +35,9 @@
     <key>KeepAlive</key>
     <true/>
 
-    <!-- Run with the user's normal login environment/working directory. -->
+    <!-- EDIT: directory containing the binary (same folder as above). -->
     <key>WorkingDirectory</key>
-    <string>/Users/rohanjadhav/Code/Projects/yt-playpause-server</string>
+    <string>/Users/YOUR_USERNAME/Auto-playpause-server</string>
 
     <!-- Name of the installed app to control, exactly as macOS/System
          Events knows it. Verify with:
